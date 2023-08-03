@@ -1,0 +1,296 @@
+# C++
+
+This is a note for my c++ SWE interview.
+
+
+# Questions I came accross
+
+## How to stop people deriving from my class?
+
+source: [Bjarne Stroustrup's FAQ](https://www.stroustrup.com/bs_faq2.html#no-derivation)
+
+First, why do you want to? There are two common answers:
+
+- for efficiency: to avoid my function calls being virtual
+- for safety: to ensure that my class is not used as a base class (for example, to be sure that I can copy objects without fear of slicing)
+
+According to Stroustrup, 
+> the efficiency reason is usually misplaced fear. In C++, virtual function calls are so fast that their real-world use for a class designed with virtual functions does not to produce measurable run-time overheads compared to alternative solutions using ordinary function calls. Note that the virtual function call mechanism is typically used only when calling through a pointer or a reference. When calling a function directly for a named object, the virtual function class overhead is easily optimized away.
+
+Ok, now how to stop people deriving from my class? In C++11, the solution is the [final](https://en.cppreference.com/w/cpp/language/final) specifier.
+```c++
+struct Base {
+    virtual void f();
+};
+
+struct Derived final : Base {  // now Derived is final; you cannot derive from it
+    void f() override;
+};
+
+struct DD : Derived {  // error: a 'final' class type cannot be used as a base class
+                       // ...
+};
+```
+
+Sounds easy. However, in my interview, the interviewer didn't allow me to use `final`. Thanks to Stroustrup, I now know the answer. For older compilers, you can use a clumsy technique:
+
+```c++
+class Usable;
+
+class Usable_lock {
+    friend class Usable;
+
+   private:
+    Usable_lock() {}
+    Usable_lock(const Usable_lock&) {}
+};
+
+class Usable : public virtual Usable_lock {
+    // ...
+   public:
+    Usable();
+    Usable(char*);
+    // ...
+};
+
+Usable a;
+
+class DD : public Usable {};  // ok, but...
+
+DD dd;  // error: DD::DD() cannot access
+        // Usable_lock::Usable_lock(): private  member
+```
+
+
+## Virtual in C++
+
+### Virtual Function / Runtime polymorphism
+
+source: [Geeksforgeeks: Virtual Function in C++](https://www.geeksforgeeks.org/virtual-function-cpp/)
+- A virtual function is a member function which is declared within a base class and is re-defined (overridden) by a derived class.
+- If we have created a virtual function in the base class and it is being overridden in the derived class, then we don’t need virtual keyword in the derived class.  e.g. `derived::print()` is automatically considered as a virtual function.
+- **When you refer to a derived class object using a pointer or a reference to the base class**, you can call a virtual function for that object and execute the derived class’s version of the function. This is called runtime polymorphism.
+
+Basic example:
+```c++
+// code adapted from https://www.geeksforgeeks.org/cpp-polymorphism/
+#include <bits/stdc++.h>
+using namespace std;
+
+class base {
+   public:
+    virtual void print() { cout << "print base class" << endl; }
+
+    void show() { cout << "show base class" << endl; }
+};
+
+class derived : public base {
+   public:
+    // print () is already virtual function in
+    // derived class, we could also declared as
+    // virtual void print () explicitly
+    void print() { cout << "print derived class" << endl; }
+
+    void show() { cout << "show derived class" << endl; }
+};
+
+int main() {
+    base *bptr;
+    derived d;
+    bptr = &d;
+
+    // Virtual function, binded at
+    // runtime (Runtime polymorphism)
+    // output: print derived class
+    bptr->print();
+
+    // Non-virtual function, binded
+    // at compile time
+    // output: show base class
+    bptr->show();
+
+    return 0;
+}
+```
+
+### Virtual Inheritance / Virtual Base Class
+source: [wiki: Virtual inheritance](https://en.wikipedia.org/wiki/Virtual_inheritance), [Geeksforgeeks: Virtual base class](https://www.geeksforgeeks.org/virtual-base-class-in-c/)
+
+Virtual inheritance is a C++ technique that ensures only one copy of a base class's member variables are inherited by grandchild derived classes.
+
+Consider the situation where we have one class A .This class A is inherited by two other classes B and C. Both B and C are inherited by class D. This is called [diamond problem](https://en.wikipedia.org/wiki/Multiple_inheritance#The_diamond_problem).
+```
+  A  
+ / \  
+B   C  
+ \ /  
+  D 
+```
+
+Now let's try to implement this graph without using `virtual`.
+{% highlight c++ linenos %}
+#include <iostream>
+using namespace std;
+
+class A {
+   private:
+    string _msg;
+
+   public:
+    A(std::string x) : _msg(x) {
+        cout << "A constructor\n";
+    }
+    void show() {
+        cout << "show " << _msg << "\n";
+    }
+};
+
+class B : public A {
+   public:
+    B(std::string x) : A("b") {
+        cout << "B constructor\n";
+    }
+};
+
+class C : public A {
+   public:
+    C(std::string x) : A("c") {
+        cout << "C constructor\n";
+    }
+};
+
+class D : public B, public C {
+   public:
+    D(std::string x) : B("d_b"), C("d_c") {
+        cout << "D constructor\n";
+    }
+};
+
+int main() {
+    D d_object("useless");  // output: A constructor
+                            //         B constructor
+                            //         A constructor
+                            //         C constructor
+                            //         D constructor
+
+    // d_object.show();  // compile error: "D::show" is ambiguous
+
+    // A& a = d_object;  // compile error: base class "A" is ambiguous
+
+    // solution 1: use compile time cast
+    A& Aref_cast_from_D_to_B = static_cast<B&>(d_object);
+    Aref_cast_from_D_to_B.show();  // output: show b
+    A& Aref_cast_from_D_to_C = static_cast<C&>(d_object);
+    Aref_cast_from_D_to_C.show();  // output: show c
+
+    // solution 2: use scope resolution
+    d_object.B::show();  // access B's A, output: show b
+    d_object.C::show();  // access C's A, output: show c
+}
+{% endhighlight %}
+
+
+We got error in line 45 and 47. The reason is that, a `D` will contain two copies of `A`'s member variables: one via `B`, and one via `C`. These two copies could be accessible by using [static cast](https://www.geeksforgeeks.org/static_cast-in-c-type-casting-operators/) or [scope resolution](https://en.wikipedia.org/wiki/Scope_resolution_operator)).
+
+To sum up, when any data or function member of class A is accessed by an object of class D, ambiguity arises.
+
+Now, let's see how we use `virtual` specifier to avoid ambiguity.
+{% highlight c++ linenos %}
+#include <iostream>
+using namespace std;
+
+class A {
+   private:
+    string _msg;
+
+   public:
+    A(std::string x) : _msg(x) {
+        cout << "A constructor\n";
+    }
+    void show() {
+        cout << "show " << _msg << "\n";
+    }
+};
+
+class B : virtual public A {  // virtually inherits A. B becomes virtual base class.
+   public:
+    B(std::string x) : A("b") {
+        cout << "B constructor\n";
+    }
+};
+
+class C : virtual public A {  // virtually inherits A. C becomes virtual base class.
+   public:
+    C(std::string x) : A("c") {
+        cout << "C constructor\n";
+    }
+};
+
+class D : public B, public C {
+   public:
+    D(std::string x) : A("d_a"), B("d_b"), C("d_c") {  // need to call A's constructor
+        cout << "D constructor\n";
+    }
+};
+
+int main() {
+    D d_object("useless");  // output: A constructor
+                            //         B constructor
+                            //         C constructor
+                            //         D constructor
+
+    d_object.show();  // output: show d_a
+
+    A& a = d_object;  // good
+
+    // use compile time cast
+    A& Aref_cast_from_D_to_B = static_cast<B&>(d_object);
+    Aref_cast_from_D_to_B.show();  // output: show d_a
+    A& Aref_cast_from_D_to_C = static_cast<C&>(d_object);
+    Aref_cast_from_D_to_C.show();  // output: show d_a
+
+    // use scope resolution
+    d_object.B::show();  // output: show d_a
+    d_object.C::show();  // output: show d_a
+}
+{% endhighlight %}
+Now, a `D` has only one, shared `A` instance in its representation, so there's no ambiguity anymore.
+
+### Virtual Destructor
+source: [geeksforgeeks: Virtual Destructor](https://www.geeksforgeeks.org/virtual-destructor/)
+
+Deleting a derived class object using a pointer of base class type that has a non-virtual destructor results in **undefined** behavior.
+
+To solve this problem, the base class should be defined with a virtual destructor.
+
+{% highlight c++ linenos %}
+#include <iostream>
+
+using namespace std;
+
+class base {
+   public:
+    base() { cout << "Constructing base\n"; }
+    virtual ~base() { cout << "Destructing base\n"; } // virtual!
+};
+
+class derived : public base {
+   public:
+    derived() { cout << "Constructing derived\n"; }
+    virtual ~derived() { cout << "Destructing derived\n"; } // the virtual specifier here isn't necessary
+};
+
+int main() {
+    derived *d = new derived();  // output: Constructing base
+                                 //         Constructing derived
+    base *b = d;
+    delete b;  // output: Destructing derived
+               //         Destructing base
+    return 0;
+}
+{% endhighlight %}
+According to Scott Meyers' [Effective C++](https://www.amazon.com/dp/0201924889):
+- Always declare destructors virtual in polymorphic base classes.
+- If a class has any virtual function, it should have a virtual destructor.
+- Classes not designed to be base classes or not designed to be used polymorphically should not declare virtual destructors.
+
